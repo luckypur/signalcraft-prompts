@@ -1,0 +1,23 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignalCraft</title><style>
+:root{font-family:system-ui,sans-serif;color:#202d3b;background:#f4f7fb}body{max-width:1120px;margin:42px auto;padding:0 16px}h1{font-size:2.1rem;margin-bottom:4px}
+small,.muted{color:#607184}.shell{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:26px}.panel{background:#fff;padding:22px;border-radius:12px;box-shadow:0 3px 16px #1f33400d}
+label{display:block;font-weight:600;margin:14px 0 6px}textarea,input,select{box-sizing:border-box;width:100%;padding:10px;border:1px solid #ccd5df;border-radius:6px;font:inherit}textarea{min-height:102px}
+button{border:0;background:#155e81;color:white;padding:12px 17px;border-radius:7px;font-weight:600;cursor:pointer;margin:14px 8px 0 0}button.secondary{background:#455969}pre{white-space:pre-wrap;line-height:1.5;font-family:inherit}#result{min-height:155px}a{color:#155e81}@media(max-width:770px){.shell{grid-template-columns:1fr}}
+</style></head><body><small>OPERATIONS / EXPERIMENTAL TOOLING</small><h1>SignalCraft</h1><p class="muted">Incident updates, consistent under pressure. Compare prompt variants against the same runbook context.</p>
+<div class="shell"><section class="panel"><label for="summary">What happened?</label><textarea id="summary">Payment confirmation is delayed for some customers, status updates are inconsistent.</textarea>
+<label for="confirmed">Confirmed action (optional)</label><textarea id="confirmed" placeholder="Only verified facts"></textarea><label for="severity">Severity</label><select id="severity"><option>SEV1</option><option selected>SEV2</option><option>SEV3</option></select>
+<label for="audience">Audience</label><select id="audience"><option>customers</option><option>internal</option><option>partners</option></select><label for="variant">Prompt style</label><select id="variant"><option>brief</option><option>empathetic</option><option>technical</option></select>
+<button onclick="send('/api/draft')">Generate draft</button><button class="secondary" onclick="send('/api/compare')">Compare variants</button></section>
+<section class="panel"><h2>Draft output</h2><pre id="result">No draft yet.</pre><p id="meta" class="muted"></p><h3>Evidence</h3><div id="evidence" class="muted">Retrieval results appear here.</div></section></div>
+<p class="muted">Local-first demo. <a href="/docs">Explore API</a> · <a href="/api/evaluate">Evaluation results</a> · <a href="/api/history">Run history</a></p>
+<script>
+async function send(path){const body={summary:document.getElementById('summary').value,confirmed:document.getElementById('confirmed').value,
+severity:document.getElementById('severity').value,audience:document.getElementById('audience').value,variant:document.getElementById('variant').value};
+const result=document.getElementById('result');result.textContent='Working…';try{const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(JSON.stringify(d));
+result.textContent=path.endsWith('compare')?d.variants.map(v=>`${v.variant.toUpperCase()}\n${v.draft}`).join('\n\n────────\n\n'):d.draft;
+const first=path.endsWith('compare')?d.variants[0]:d;
+document.getElementById('meta').textContent=`Mode: ${first.provider} · Quality checks: ${first.quality.score}%`;
+document.getElementById('evidence').textContent=first.sources.map(x=>`${x.title} (vector score ${x.score})`).join(' • ');
+}catch(e){result.textContent=e.message}}
+</script></body></html>
