@@ -12,8 +12,11 @@ from .quality import score_draft
 from .search import search
 from .storage import connect, runbooks
 
+import logging
+
 LOCK = threading.Lock()
 
+logger = logging.getLogger(__name__)
 
 class DraftRequest(BaseModel):
     summary: str = Field(min_length=8, max_length=1200)
