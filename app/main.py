@@ -56,32 +56,89 @@ def search_runbooks(q: str):
     return search(q, list_runbooks())
 
 
+
 async def make_draft(req: DraftRequest, persist: bool = True):
     incident = Incident(req.summary, req.audience, req.severity, req.confirmed)
     evidence = search(req.summary, list_runbooks(), 2)
     prompt = build_prompt(incident, req.variant, evidence)
+
     provider = "offline"
+    fallback_used = False
+
     if os.getenv("OPENAI_API_KEY"):
-        from openai import AsyncOpenAI
-        response = await AsyncOpenAI().chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            messages=prompt, temperature=0.2, timeout=20,
-        )
-        draft = response.choices[0].message.content or ""
-        provider = "openai"
+        from openai import APIError, AsyncOpenAI
+
+        try:
+            response = await AsyncOpenAI().chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                messages=prompt,
+                temperature=0.2,
+                timeout=20,
+            )
+
+            draft = (response.choices[0].message.content or "").strip()
+
+            if not draft:
+                raise ValueError("Model returned an empty draft")
+
+            provider = "openai"
+
+        except (APIError, ValueError) as exc:
+            logger.warning(
+                "LLM generation failed: %s",
+                type(exc).__name__,
+            )
+
+            if os.getenv("ALLOW_OFFLINE_FALLBACK", "false").lower() == "true":
+                draft = deterministic_draft(
+                    incident, req.variant, evidence
+                )
+                provider = "offline_fallback"
+                fallback_used = True
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="AI generation unavailable; no draft saved",
+                ) from exc
     else:
-        draft = deterministic_draft(incident, req.variant, evidence)
+        draft = deterministic_draft(
+            incident, req.variant, evidence
+        )
+
     evaluation = score_draft(draft)
+
     if persist:
         with LOCK:
             app.state.db.execute(
                 "INSERT INTO generations(incident,audience,variant,prompt,output,provider) VALUES(?,?,?,?,?,?)",
-                (req.summary, req.audience, req.variant, str(prompt), draft, provider),
+                (
+                    req.summary,
+                    req.audience,
+                    req.variant,
+                    str(prompt),
+                    draft,
+                    provider,
+                ),
             )
             app.state.db.commit()
-    return {"draft": draft, "variant": req.variant, "quality": evaluation,
-            "provider": provider, "sources": [{"id": e["id"], "title": e["title"], "score": e["score"]} for e in evidence],
-            "prompt": prompt}
+
+    return {
+        "draft": draft,
+        "variant": req.variant,
+        "quality": evaluation,
+        "provider": provider,
+        "fallback_used": fallback_used,
+        "sources": [
+            {
+                "id": e["id"],
+                "title": e["title"],
+                "score": e["score"],
+            }
+            for e in evidence
+        ],
+        "prompt": prompt,
+    }
+
 
 
 @app.post("/api/draft")
