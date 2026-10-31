@@ -43,8 +43,10 @@ def home():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "mode": "openai" if os.getenv("OPENAI_API_KEY") else "offline"}
-
+    return {
+        "status": "ok",
+        "mode": os.getenv("LLM_PROVIDER", "offline").lower()
+    }
 
 @app.get("/api/runbooks")
 def list_runbooks():
@@ -68,31 +70,70 @@ async def make_draft(req: DraftRequest, persist: bool = True):
     provider = "offline"
     fallback_used = False
 
-    if os.getenv("OPENAI_API_KEY"):
+    mode = os.getenv("LLM_PROVIDER", "offline").lower()
+
+    if mode not in ("offline", "openai", "ollama"):
+        raise HTTPException(
+            status_code=500,
+            detail="Invalid LLM_PROVIDER setting"
+        )
+
+    provider = "offline"
+    fallback_used = False
+
+    if mode == "offline":
+        draft = deterministic_draft(
+            incident, req.variant, evidence
+        )
+
+    else:
         from openai import APIError, AsyncOpenAI
 
-        try:
-            response = await AsyncOpenAI().chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-                messages=prompt,
-                temperature=0.2,
-                timeout=20,
-            )
+        if mode == "ollama":
+            client_options = {
+                "base_url": os.getenv(
+                    "OLLAMA_BASE_URL",
+                    "http://host.docker.internal:11434/v1"
+                ),
+                "api_key": "ollama",
+                "max_retries": 0,
+            }
+            model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+            timeout = 180
 
-            draft = (response.choices[0].message.content or "").strip()
+        else:
+            client_options = {"max_retries": 0}
+            model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            timeout = 20
+
+        try:
+            async with AsyncOpenAI(**client_options) as client:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=prompt,
+                    temperature=0.2,
+                    timeout=timeout,
+                )
+
+            draft = (
+                response.choices[0].message.content or ""
+            ).strip()
 
             if not draft:
                 raise ValueError("Model returned an empty draft")
 
-            provider = "openai"
+            provider = mode
 
-        except (APIError, ValueError) as exc:
+        except (APIError, ValueError, IndexError) as exc:
             logger.warning(
-                "LLM generation failed: %s",
+                "LLM generation failed (%s): %s",
+                mode,
                 type(exc).__name__,
             )
 
-            if os.getenv("ALLOW_OFFLINE_FALLBACK", "false").lower() == "true":
+            if os.getenv(
+                "ALLOW_OFFLINE_FALLBACK", "false"
+            ).lower() == "true":
                 draft = deterministic_draft(
                     incident, req.variant, evidence
                 )
@@ -101,12 +142,8 @@ async def make_draft(req: DraftRequest, persist: bool = True):
             else:
                 raise HTTPException(
                     status_code=503,
-                    detail="AI generation unavailable; no draft saved",
+                    detail="LLM generation unavailable; no draft saved",
                 ) from exc
-    else:
-        draft = deterministic_draft(
-            incident, req.variant, evidence
-        )
 
     evaluation = score_draft(draft)
 

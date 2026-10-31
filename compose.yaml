@@ -6,6 +6,10 @@ services:
       DB_PATH: /app/data/signalcraft.sqlite3
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      LLM_PROVIDER: ${LLM_PROVIDER:-offline}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+      ALLOW_OFFLINE_FALLBACK: ${ALLOW_OFFLINE_FALLBACK:-false}
     volumes:
       - signalcraft_data:/app/data
     healthcheck:
